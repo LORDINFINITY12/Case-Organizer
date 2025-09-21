@@ -56,7 +56,6 @@ ALLOWED_USERS = _cfg.get("ALLOWED_USERS", [])
 PASSWORD = _cfg.get("PASSWORD")
 SECRET_KEY = os.environ.get("CASEORG_SECRET_KEY", "dev-local-secret-key")
 
-# Extensions allowed at runtime (can keep hardcoded)
+# Extensions allowed at runtime
 ALLOWED_EXTENSIONS = {"pdf","docx","txt","png","jpg","jpeg","json"}
-
 

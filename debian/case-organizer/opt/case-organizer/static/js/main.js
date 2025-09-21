@@ -18,6 +18,7 @@ const SUBCATS = {
     "Civil Writ Petition","Orders/Judgments","Primary Documents",
     "Reference","Transfer Petitions"
   ],
+  // NOTE: Intentionally no "Case Law" key so subcategory is disabled when selected.
 };
 
 const CASE_TYPES = {
@@ -442,7 +443,7 @@ function manageCaseForm(){
       <!-- Classification for this upload -->
       <select id="domain">
         <option value="">Case Category</option>
-        <option>Criminal</option><option>Civil</option><option>Commercial</option>
+        <option>Criminal</option><option>Civil</option><option>Commercial</option><option>Case Law</option>
       </select>
       <select id="subcategory" disabled><option value="">Subcategory</option></select>
       <input type="text" id="main-type" placeholder="Main Type (e.g., Transfer Petition, Criminal Revision, Orders)" />
@@ -519,26 +520,42 @@ function manageCaseForm(){
   // --- Domain -> Subcategory ------------------------------------------
   $('#domain').addEventListener('change', () => {
     const dom = $('#domain').value || '';
+    const subSel = $('#subcategory');
+    const mt = $('#main-type');
+
+    if (dom === 'Case Law') {
+      // Disable & clear subcategory, tweak placeholder for filename use
+      subSel.innerHTML = '<option value="">Subcategory (not used for Case Law)</option>';
+      subSel.disabled = true;
+      mt.placeholder = 'Case Law title / citation (used as filename)';
+      return;
+    }
+
+    // Non "Case Law" paths
+    mt.placeholder = 'Main Type (e.g., Transfer Petition, Criminal Revision, Orders)';
     if (dom && SUBCATS[dom]) {
-      populateOptions($('#subcategory'), SUBCATS[dom], "Subcategory");
+      populateOptions(subSel, SUBCATS[dom], "Subcategory");
     } else {
-      $('#subcategory').innerHTML = '<option value="">Subcategory</option>'; $('#subcategory').disabled = true;
+      subSel.innerHTML = '<option value="">Subcategory</option>'; subSel.disabled = true;
     }
   });
 
-// When subcategory is "Primary Documents", disable Main Type and mark optional
-$('#subcategory').addEventListener('change', () => {
-  const val = ($('#subcategory').value || '').toLowerCase();
-  const mt  = $('#main-type');
-  if (val === 'primary documents') {
-    mt.value = '';
-    mt.disabled = true;
-    mt.placeholder = 'Main Type (not used for Primary Documents)';
-  } else {
-    mt.disabled = false;
-    mt.placeholder = 'Main Type (e.g., Transfer Petition, Criminal Revision, Orders)';
-  }
-});
+  // When subcategory is "Primary Documents", disable Main Type and mark optional
+  $('#subcategory').addEventListener('change', () => {
+    const val = ($('#subcategory').value || '').toLowerCase();
+    const mt  = $('#main-type');
+    if (val === 'primary documents') {
+      mt.value = '';
+      mt.disabled = true;
+      mt.placeholder = 'Main Type (not used for Primary Documents)';
+    } else {
+      mt.disabled = false;
+      // If Case Law currently selected, keep the special placeholder
+      if (($('#domain').value || '') !== 'Case Law') {
+        mt.placeholder = 'Main Type (e.g., Transfer Petition, Criminal Revision, Orders)';
+      }
+    }
+  });
 
   // --- File selection (multi) with remove buttons ----------------------
   const dz = $('#drop');
@@ -596,9 +613,9 @@ $('#subcategory').addEventListener('change', () => {
     fd.set('Month', month);
     fd.set('Case Name', cname);
     fd.set('Domain', $('#domain').value || '');
-    fd.set('Subcategory', $('#subcategory').value || '');
-    fd.set('Main Type', ($('#main-type').value || '').trim());   // OPTIONAL
-    fd.set('Date', $('#mc-date').value);                         // used only if Main Type provided
+    fd.set('Subcategory', $('#subcategory').value || '');          // will be empty for Case Law
+    fd.set('Main Type', ($('#main-type').value || '').trim());      // used as filename for Case Law
+    fd.set('Date', $('#mc-date').value);                           // kept for parity (ignored for Case Law)
     selectedFiles.forEach(f => fd.append('file', f));
 
     const r = await fetch('/manage-case/upload', { method: 'POST', body: fd });
@@ -694,7 +711,7 @@ function autoDismissFlashes(ms = 3000){
 window.addEventListener('DOMContentLoaded', () => {
   // ...your existing wiring...
   autoDismissFlashes(3000);
-  populateYearSelect('year', 2015, 5);
+  // (keep whatever else you had here; removed stray call to undefined populateYearSelect)
 });
 
 // --- Dark/Light Mode ------------------------------------------

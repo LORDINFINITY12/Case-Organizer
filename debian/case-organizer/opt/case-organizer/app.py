@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import os
@@ -6,6 +7,7 @@ import shutil
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
+import json
 from typing import Dict, Any
 
 from flask import (
@@ -403,7 +405,7 @@ def manage_case_upload():
         return jsonify({"ok": False, "msg": "Year, Month, and Case Name are required."}), 400
 
     # Classification that influences filename
-    domain      = normalize_ws(form.get("Domain"))        # Criminal / Civil / Commercial
+    domain      = normalize_ws(form.get("Domain"))        # Criminal / Civil / Commercial / Case Law
     subcategory = normalize_ws(form.get("Subcategory"))   # optional subfolder
     main_type   = normalize_ws(form.get("Main Type"))     # OPTIONAL now
 
@@ -415,7 +417,7 @@ def manage_case_upload():
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d") if date_str else datetime.now()
     except ValueError:
-        return jsonify({"ok": False, "msg": "Invalid Date. Use YYYY-MM-DD."}), 400
+        return jsonify({"ok": False, "msg": "Invalid Date. Use YYYY-MM-DD."}), 401
 
     # Accept MULTIPLE files
     files = request.files.getlist("file")
@@ -426,15 +428,55 @@ def manage_case_upload():
     if not cdir.exists():
         return jsonify({"ok": False, "msg": "Case directory does not exist. Create the case first."}), 400
 
-    target_dir = cdir / subcategory if subcategory else cdir
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    saved_paths = []
-
     # Helper: safe original base (without extension)
     def safe_stem(filename: str) -> str:
         base = Path(secure_filename(filename)).stem
         return re.sub(r"\s+", " ", base).strip()
+
+    saved_paths = []
+
+    # ---------- NEW: Case Law handling ----------
+    if domain.lower() == "case law":
+        target_dir = cdir / "Case Laws"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        for f in files:
+            if not f or f.filename == "":
+                continue
+            if not allowed_file(f.filename):
+                continue
+
+            ext = f.filename.rsplit(".", 1)[1].lower()
+
+            # Filename = Main Type (as typed) OR fallback to original stem
+            base = (main_type or "").strip() or safe_stem(f.filename)
+            # sanitize whitespace
+            base = re.sub(r"\s+", " ", base).strip()
+            new_name = f"{base}.{ext}"
+
+            tmp = target_dir / secure_filename(f"_upload_{datetime.now().timestamp()}_{secure_filename(f.filename)}")
+            f.save(tmp)
+            dest = target_dir / new_name
+
+            final_dest = dest
+            counter = 1
+            while final_dest.exists():
+                final_dest = target_dir / (dest.stem + f"_{counter}" + dest.suffix)
+                counter += 1
+
+            shutil.copyfile(tmp, final_dest)
+            tmp.unlink(missing_ok=True)
+            saved_paths.append(str(final_dest))
+
+        if not saved_paths:
+            return jsonify({"ok": False, "msg": "No files were saved (unsupported type?)"}), 400
+
+        return jsonify({"ok": True, "saved_as": saved_paths})
+    # ---------- END Case Law handling ----------
+
+    # Regular categories (Criminal/Civil/Commercial)
+    target_dir = cdir / subcategory if subcategory else cdir
+    target_dir.mkdir(parents=True, exist_ok=True)
 
     for f in files:
         if not f or f.filename == "":
@@ -445,7 +487,7 @@ def manage_case_upload():
         ext = f.filename.rsplit(".", 1)[1].lower()
 
         # Naming rules:
-        # - If subcategory is "Reference" OR main_type is empty => keep original name, append " - {Case Name}"
+        # - If subcategory is "Primary Documents" OR main_type is empty => keep original name, append " - {Case Name}"
         # - Else => use the typed scheme "(DDMMYYYY) TYPE DOMAIN CaseName.ext"
         is_primary_docs = subcategory and subcategory.strip().lower() == "primary documents"
         if is_primary_docs or not main_type:
@@ -454,7 +496,6 @@ def manage_case_upload():
         else:
             new_name = build_filename(dt, main_type, domain, case_name, ext)
 
-        # Save tmp, then copy to final; dedupe with _1, _2...
         tmp = target_dir / secure_filename(f"_upload_{datetime.now().timestamp()}_{secure_filename(f.filename)}")
         f.save(tmp)
         dest = target_dir / new_name
@@ -525,7 +566,7 @@ def search():
         root = FS_ROOT
         years = [FS_ROOT / year] if year else [d for d in root.iterdir() if d.is_dir()]
         for y in years:
-            if not y.is_dir(): 
+            if not y.is_dir():
                 continue
             months = [y / month] if month else [d for d in y.iterdir() if d.is_dir()]
             for m in months:
@@ -625,6 +666,34 @@ def search():
             })
 
     return jsonify({"results": results})
+
+
+# ---- View/Edit Note.json --------------------------------
+@app.route("/view_note/<year>/<month>/<case_name>", methods=["GET", "POST"])
+def view_note(year, month, case_name):
+    cdir = FS_ROOT / year / month / case_name
+    note_path = cdir / "Note.json"
+
+    if request.method == "POST":
+        new_content = request.form.get("note_content", "")
+        try:
+            # validate JSON
+            data = json.loads(new_content)
+            note_path.write_text(json.dumps(data, indent=4), encoding="utf-8")
+            flash("Note.json updated successfully!", "success")
+        except Exception as e:
+            flash(f"Invalid JSON: {e}", "error")
+
+    if note_path.exists():
+        content = note_path.read_text(encoding="utf-8")
+    else:
+        content = "{}"
+
+    return render_template("view_note.html",
+                           year=year, month=month, case_name=case_name,
+                           content=content)
+
+
 
 # ---- Entrypoint ---------------------------------------------------------
 if __name__ == "__main__":

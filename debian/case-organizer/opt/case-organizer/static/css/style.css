@@ -1,9 +1,8 @@
-
 :root {
   --bg: #f6f7fb;
   --card: #ffffff;
-  --accent: #7aa6ff;   /* pastel blue */
-  --accent-2: #9fe2bf; /* pastel green */
+  --accent: #7aa6ff;
+  --accent-2: #9fe2bf;
   --text: #1f2430;
   --muted: #6b7280;
   --shadow: 0 10px 30px rgba(0,0,0,0.08);
@@ -41,12 +40,11 @@ body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto
 .topbar .brand { font-weight: 600; }
 .topbar .spacer { flex: 1; }
 .topbar .theme-toggle { flex: 0 0 auto; margin-right: 6px; z-index: 1; }
-.topbar .logout { position: relative; z-index: 2; } /* keep logout above, just in case */
-
+.topbar .logout { position: relative; z-index: 2; }
 
 .home { padding: 24px; max-width: 1100px; margin: 0 auto; }
 
-/* Entry animation after login */
+/* Entry animation */
 .enter-animate { opacity: 0; transform: scale(0.92); animation: pop 420ms ease-out forwards; }
 @keyframes pop { to { opacity: 1; transform: scale(1); } }
 
@@ -55,8 +53,7 @@ body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto
 .search-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; }
 .search-row input { padding: 12px 14px; border-radius: 12px; border: 1px solid #e6e8ef; }
 
-
-/* Compact, wrapping Advanced Search layout (no fixed columns) */
+/* Advanced Search layout */
 .adv-form{
   display: flex;
   flex-wrap: wrap;
@@ -64,8 +61,6 @@ body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto
   margin-top: 10px;
   align-items: start;
 }
-
-/* Make the Year dropdown itself size to its label */
 .adv-form .year-dd { width: max-content; }
 .adv-form .year-dd .yd-trigger { width: auto; min-width: 8ch; }
 
@@ -91,12 +86,7 @@ body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto
 .dropzone { border: 2px dashed #cdd6f6; background: #f8faff; border-radius: 16px; padding: 24px; text-align: center; color: var(--muted); }
 .dropzone.dragover { background: #eef4ff; }
 
-/* Within the #file-list container, each .result-item is a flex row already.
-   This nudges the layout so items start at the left and have some breathing room. */
-#file-list .result-item { justify-content: flex-start; gap: 12px; }
-.badge { padding: 2px 8px; border-radius: 10px; background: #eef1f7; font-size: 12px; }
-
-/* Styles for file list items and size badges in Manage Case */
+/* Manage Case file list */
 #file-list .result-item { justify-content: flex-start; gap: 12px; }
 .badge { padding: 2px 8px; border-radius: 10px; background: #eef1f7; font-size: 12px; }
 
@@ -104,7 +94,7 @@ body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto
 .flash { transition: opacity .3s ease, transform .3s ease; }
 .flash.flash-fade { opacity: 0; transform: translateY(-6px); }
 
-/* ---------- Theme toggle button ---------- */
+/* Theme toggle */
 .theme-toggle {
   background: transparent;
   border: 1px solid #e0e3ec;
@@ -118,76 +108,45 @@ body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto
 }
 .theme-toggle:focus { outline: 2px solid var(--accent-2); outline-offset: 2px; }
 
-/* Smooth theme transitions (kept subtle) */
+/* Smooth theme transitions */
 html, body, .topbar, .search-section, .card.big, .form-card, .dropzone, .result-item, .flash {
   transition: background-color .25s ease, color .25s ease, border-color .25s ease, outline-color .25s ease;
 }
 
-/* ---------- Dark theme palette ---------- */
+/* Dark theme */
 :root[data-theme="dark"] {
   --bg: #101317;
   --card: #151a21;
-  --accent: #7aa6ff;   /* keep brand color */
-  --accent-2: #6ed6b2; /* tuned for dark */
+  --accent: #7aa6ff;
+  --accent-2: #6ed6b2;
   --text: #e8edf5;
   --muted: #9aa4b2;
   --shadow: 0 10px 30px rgba(0,0,0,0.4);
 }
-
-/* Components in dark theme */
 :root[data-theme="dark"] body { background: var(--bg); color: var(--text); }
 :root[data-theme="dark"] .topbar { background: var(--card); box-shadow: var(--shadow); }
 :root[data-theme="dark"] .logout, :root[data-theme="dark"] .user { color: var(--muted); }
-
 :root[data-theme="dark"] .search-section,
 :root[data-theme="dark"] .card.big,
-:root[data-theme="dark"] .form-card {
-  background: var(--card);
-  box-shadow: var(--shadow);
-  color: var(--text);
-}
-
+:root[data-theme="dark"] .form-card { background: var(--card); box-shadow: var(--shadow); color: var(--text); }
 :root[data-theme="dark"] .search-row input,
 :root[data-theme="dark"] .form-grid input,
 :root[data-theme="dark"] .form-grid select,
-:root[data-theme="dark"] .form-grid textarea {
-  background: #0e1116;
-  color: var(--text);
-  border: 1px solid #293241;
-}
-
-:root[data-theme="dark"] .result-item {
-  background: #0e1116;
-  border: 1px solid #293241;
-}
-
-:root[data-theme="dark"] .dropzone {
-  border-color: #2a3550;
-  background: #131822;
-}
-:root[data-theme="dark"] .dropzone.dragover {
-  background: #0f1827;
-}
-
+:root[data-theme="dark"] .form-grid textarea { background: #0e1116; color: var(--text); border: 1px solid #293241; }
+:root[data-theme="dark"] .result-item { background: #0e1116; border: 1px solid #293241; }
+:root[data-theme="dark"] .dropzone { border-color: #2a3550; background: #131822; }
+:root[data-theme="dark"] .dropzone.dragover { background: #0f1827; }
 :root[data-theme="dark"] .btn-primary { color: #fff; }
 :root[data-theme="dark"] .btn-secondary { color: #0b3d2e; }
 :root[data-theme="dark"] .btn-ghost { color: var(--muted); border-color: #2a3240; }
-
 :root[data-theme="dark"] .flash { background: #0e1116; border-color: #2a3240; }
 :root[data-theme="dark"] .flash.success { border-left-color: #3b82f6; }
 :root[data-theme="dark"] .flash.error   { border-left-color: #ef4444; }
 :root[data-theme="dark"] .flash.warning { border-left-color: #f59e0b; }
 :root[data-theme="dark"] .flash.info    { border-left-color: #0ea5e9; }
-
 :root[data-theme="dark"] a { color: #9dbbff; }
+:root[data-theme="dark"] .badge { background: #1e2531; color: var(--muted); }
 
-/* Selected files meta badge in dark */
-:root[data-theme="dark"] .badge {
-  background: #1e2531;
-  color: var(--muted);
-}
-
-/* One-size theme-aware form control reset (drop-in) */
 :root { color-scheme: dark; --input-bg:#fbfcff; --input-border:#e6e8ef; }
 :root[data-theme="dark"] { color-scheme: dark; --input-bg:#0e1116; --input-border:#293241; }
 
@@ -197,26 +156,17 @@ body input, body select, body textarea {
   border-color: var(--input-border) !important;
 }
 
-
-/* Theme-aware native control glyphs (WebKit/Blink) */
+/* Date picker glyphs */
 :root { --chrome-ctrl-invert: 0; }
 :root[data-theme="dark"] { --chrome-ctrl-invert: 1; }
-
-/* Date picker button (calendar icon) */
-input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(var(--chrome-ctrl-invert));
-}
-
-/* (Optional) force text color inside date fields to track theme */
+input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(var(--chrome-ctrl-invert)); }
 input[type="date"]::-webkit-datetime-edit,
 input[type="date"]::-webkit-datetime-edit-text,
 input[type="date"]::-webkit-datetime-edit-year-field,
 input[type="date"]::-webkit-datetime-edit-month-field,
-input[type="date"]::-webkit-datetime-edit-day-field {
-  color: var(--text);
-}
+input[type="date"]::-webkit-datetime-edit-day-field { color: var(--text); }
 
-/* Hide native number input spinners (Chrome/Safari/Edge/Firefox) */
+/* Hide number spinners */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 input[type="number"] { -moz-appearance: textfield; }
@@ -231,15 +181,13 @@ input[type="number"] { -moz-appearance: textfield; }
   padding: 8px 12px;
   cursor: pointer;
 }
-:root[data-theme="dark"] .yd-trigger {
-  border-color: var(--input-border, #293241);
-}
+:root[data-theme="dark"] .yd-trigger { border-color: var(--input-border, #293241); }
 .yd-panel {
   position: absolute;
   z-index: 20;
   margin-top: 6px;
   width: 180px;
-  max-height: 240px;          /* visible window */
+  max-height: 240px;
   overflow-y: auto;
   background: var(--card);
   color: var(--text);
@@ -247,11 +195,9 @@ input[type="number"] { -moz-appearance: textfield; }
   border-radius: 12px;
   box-shadow: var(--shadow);
 }
-:root[data-theme="dark"] .yd-panel {
-  border-color: var(--input-border, #293241);
-}
+:root[data-theme="dark"] .yd-panel { border-color: var(--input-border, #293241); }
 .yd-item {
-  height: 32px;               /* must match itemHeight in JS */
+  height: 32px;
   line-height: 32px;
   padding: 0 12px;
   cursor: pointer;
@@ -260,16 +206,9 @@ input[type="number"] { -moz-appearance: textfield; }
 :root[data-theme="dark"] .yd-item:hover { background: rgba(255,255,255,0.06); }
 .yd-item.selected { font-weight: 600; }
 
-
-/* Restore consistent rounded controls + remove stray UA shadows */
+/* Rounded controls */
 :root { --control-radius: 12px; }
-
-body input, body select, body textarea {
-  border-radius: var(--control-radius) !important;
-  box-shadow: none !important;
-}
-
-/* Make Advanced Search controls match the Create/Manage forms */
+body input, body select, body textarea { border-radius: var(--control-radius) !important; box-shadow: none !important; }
 .adv-form input, .adv-form select {
   padding: 10px 12px;
   border: 1px solid var(--input-border, #e6e8ef) !important;
@@ -278,17 +217,71 @@ body input, body select, body textarea {
   color: var(--text) !important;
 }
 :root[data-theme="dark"] .adv-form input,
-:root[data-theme="dark"] .adv-form select {
-  border-color: var(--input-border, #293241) !important;
+:root[data-theme="dark"] .adv-form select { border-color: var(--input-border, #293241) !important; }
+
+input[type="number"].year-input { width: 6ch; min-width: 4ch; max-width: 8ch; display: inline-block; }
+
+/* --- Notes toolbar + modal --- */
+.note-actions {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0 14px;
+  align-items: center;
 }
 
-/* Compact year input so it only fits ~4 digits */
-input[type="number"].year-input {
-  width: 6ch;          /* enough for 4 numbers + a little breathing room */
-  min-width: 4ch;
-  max-width: 8ch;
-  display: inline-block;
+.modal[hidden] { display: none !important; }
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
+  display: grid;
+  place-items: center;
+  z-index: 50;
 }
-
-
+.modal-content {
+  width: min(900px, 92vw);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.notes-pre {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 10px 12px;
+  background: #fafbff;
+  border: 1px solid #eef1f7;
+  border-radius: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+:root[data-theme="dark"] .notes-pre {
+  background: #0e1116;
+  border-color: #293241;
+}
+.notes-editor {
+  display: none;
+  min-height: 60vh;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  border-radius: 12px;
+  border: 1px solid var(--input-border, #e6e8ef);
+  background: var(--input-bg);
+  color: var(--text);
+  resize: vertical;
+  white-space: pre;
+}
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
 
