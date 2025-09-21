@@ -1,6 +1,0 @@
-#!/bin/sh
-set -e
-systemctl daemon-reload >/dev/null 2>&1 || true
-# On purge you could remove venv/config, but we leave data alone by default.
-exit 0
-
