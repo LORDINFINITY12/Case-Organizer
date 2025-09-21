@@ -1,0 +1,10 @@
+case-organizer (1.0.4) unstable; urgency=medium
+
+  * Policy-compliant install to /usr/lib.
+  * Harden postinst to ignore empty FS root.
+  * Ship systemd unit + tmpfiles; no systemctl in scripts.
+  * Add copyright.
+  * Use adduser to create service user 'caseorg'.
+
+ -- Izumi <izumi@example.com>  Tue, 16 Sep 2025 12:34:00 +0000
+

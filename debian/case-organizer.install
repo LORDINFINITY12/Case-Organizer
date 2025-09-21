@@ -1,0 +1,6 @@
+app.py /opt/case-organizer/
+caseorg_config.py /opt/case-organizer/
+requirements.txt /opt/case-organizer/
+templates /opt/case-organizer/
+static /opt/case-organizer/
+

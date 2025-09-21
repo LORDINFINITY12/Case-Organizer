@@ -1,0 +1,11 @@
+ab312b7ee4a83749546e4cee8c338d9a  opt/case-organizer/app.py
+26b375f8477b09202b62175280bcd2d2  opt/case-organizer/caseorg_config.py
+4d3d9e8da50e7b3bdcf4ea36ce524229  opt/case-organizer/requirements.txt
+f084fb26863f864dc8b85bffd24fffd7  opt/case-organizer/static/css/style.css
+6e0b0f93f8f66cd3a92800f751db2d41  opt/case-organizer/static/js/main.js
+7d779683f0400ed8202f9d9ec3ef972d  opt/case-organizer/templates/_flash.html
+4843b5cae1cc7cc82d3ffd8ee72d1f4d  opt/case-organizer/templates/index.html
+d75f9601d308dc42d6d4abbd1a3bd3de  opt/case-organizer/templates/login.html
+8d5a4d5b3aa83bf9c2d08e4c3360bf34  usr/lib/systemd/system/case-organizer.service
+72571c7b985636838dc0c95a33a83e66  usr/lib/tmpfiles.d/case-organizer.conf
+244fdb5b49ac762485903b8b6f9780fb  usr/share/doc/case-organizer/changelog.gz
