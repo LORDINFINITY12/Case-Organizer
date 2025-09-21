@@ -1,0 +1,12 @@
+Source: case-organizer
+Section: web
+Priority: optional
+Maintainer: Izumi <izumi@example.com>
+Standards-Version: 4.6.2
+Build-Depends: debhelper-compat (= 13)
+
+Package: case-organizer
+Architecture: all
+Depends: ${misc:Depends}, python3, python3-flask
+Description: Case Organizer Flask app
+ A lightweight Flask-based file and case management tool.
