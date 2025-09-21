@@ -11,7 +11,6 @@
               const saved = localStorage.getItem(KEY);
               const wantsDark = saved ? (saved === 'dark')
                   : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-              // Force dark by default unless user explicitly chose light
               const defaultDark = true;
               const useDark = saved ? (saved === 'dark') : defaultDark || wantsDark;
               if (useDark) document.documentElement.setAttribute('data-theme', 'dark');
@@ -29,13 +28,13 @@
     <header class="topbar">
       <div class="brand">Case Organizer</div>
       <div class="spacer"></div>
-      <a href="{{ url_for('logout') }}" class="logout" title="Logout">
-          <i class="fa-solid fa-right-from-bracket"></i>
-      </a>
-      <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">
-          <i class="fa-solid fa-moon"></i>
       <div class="user">{{ session.get('user') }}</div>
-      <a href="{{ url_for('logout') }}" class="logout" title="Logout"><i class="fa-solid fa-right-from-bracket"></i></a>
+      <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">
+        <i class="fa-solid fa-moon"></i>
+      </button>
+      <a href="{{ url_for('logout') }}" class="logout" title="Logout">
+        <i class="fa-solid fa-right-from-bracket"></i>
+      </a>
     </header>
 
     <main class="home enter-animate">
@@ -69,7 +68,6 @@
             <option>Sep</option><option>Oct</option><option>Nov</option><option>Dec</option>
           </select>
 
-          <!-- NEW: Domain -> Subcategory -->
           <select id="adv-domain" aria-label="Case Category">
             <option value="">Case Category</option>
             <option>Criminal</option>
@@ -79,7 +77,6 @@
           <select id="adv-subcat" aria-label="Subcategory" disabled>
             <option value="">Subcategory</option>
           </select>
-
 
           <button id="adv-search" class="btn-secondary" type="button">Run Detailed Search</button>
         </form>
@@ -102,6 +99,22 @@
       <!-- Forms appear here -->
       <section id="form-host" aria-live="polite"></section>
     </main>
+  </div>
+
+  <!-- Global modal for Note.json view/edit -->
+  <div class="modal" id="notesModal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="notesTitle">
+    <div class="modal-content">
+      <div class="modal-head">
+        <h3 id="notesTitle">Case Notes (Note.json)</h3>
+        <button class="btn-ghost" id="notesClose" aria-label="Close">✕</button>
+      </div>
+      <pre id="notesDisplay" class="notes-pre"></pre>
+      <textarea id="notesEditor" class="notes-editor" spellcheck="false"></textarea>
+      <div class="modal-actions">
+        <button id="saveNotesBtn" class="btn-primary">Save</button>
+        <button id="cancelNotesBtn" class="btn-ghost">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
