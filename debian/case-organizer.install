@@ -1,7 +1,0 @@
-app.py                         opt/case-organizer/
-caseorg_config.py              opt/case-organizer/
-requirements.txt               opt/case-organizer/
-templates/*                    opt/case-organizer/templates/
-static/*                       opt/case-organizer/static/
-debian/usr-bin-case-organizer  usr/bin/case-organizer
-

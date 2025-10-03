@@ -1,5 +1,0 @@
-#!/bin/sh
-set -e
-# Nothing special to do
-exit 0
-
