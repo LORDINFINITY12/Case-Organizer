@@ -1,0 +1,9 @@
+case-organizer (1.1.4) unstable; urgency=medium
+
+  * Fixed the 'View / Edit Note.json' text box pop-up not appearing.
+  * Fixed the "Create Note.json' button not appearing for cases that do not
+    have a Note.json file.
+ 
+ -- Izumi <swarajswarupaggarwal@gmail.com>  Sun, 03 Oct 2025 20:35:00 +0530
+
+
