@@ -14,4 +14,4 @@ case-organizer (1.2.0) unstable; urgency=medium
   * Declared new runtime dependencies for pdfminer.six and python-docx so
     packages ship the required extraction stack.
 
- -- Izumi <swarajswarupaggarwal@gmail.com>  Sun, 22 Sep 2025 12:00:00 +0530
+ -- Izumi <swarajswarupaggarwal@gmail.com>  Sun, 03 Oct 2025 21:00:00 +0530
