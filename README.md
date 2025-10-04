@@ -125,9 +125,11 @@ Case-laws are organized as:
 ```none
 case-law/
   2025/
-    Petitioner v. Respondent/
-      Note.json
-      Petitioner v. Respondent [citation].pdf
+    Primary Type/
+      Case Type/
+        Petitioner v. Respondent/
+          Note.json
+          Petitioner v. Respondent [citation].pdf
 ```
 
 Example Filename:
