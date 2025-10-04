@@ -1,9 +1,17 @@
-case-organizer (1.1.4) unstable; urgency=medium
+case-organizer (1.2.0) unstable; urgency=medium
 
-  * Fixed the 'View / Edit Note.json' text box pop-up not appearing.
-  * Fixed the "Create Note.json' button not appearing for cases that do not
-    have a Note.json file.
- 
- -- Izumi <swarajswarupaggarwal@gmail.com>  Sun, 03 Oct 2025 20:35:00 +0530
+  * Added Case Law upload flow that stores judgments within a dedicated
+    hierarchy, captures mandatory metadata, and writes companion notes.
+  * Integrated automatic text extraction (PDF/TXT/DOCX) with a SQLite FTS5
+    index to power boolean/proximity search over uploaded case law.
+  * Introduced SCCOnline-style Case Law search UI with filters, boolean syntax, and
+    note editing directly from results.
+  * Made directory search toggleable so users can return to previous results.
+  * Ensured note modal preserves paragraph breaks and works cleanly in both
+    light and dark themes.
+  * Fixed case-law search radio controls so they respect theme changes.
+  * Synced the Debian payload with the refreshed 1.2.0 source tree.
+  * Declared new runtime dependencies for pdfminer.six and python-docx so
+    packages ship the required extraction stack.
 
-
+ -- Izumi <swarajswarupaggarwal@gmail.com>  Sun, 22 Sep 2025 12:00:00 +0530

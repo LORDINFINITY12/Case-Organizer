@@ -76,7 +76,7 @@
           </select>
 
           <button id="adv-search" class="btn-secondary" type="button">Run Detailed Search</button>
-          <button id="dir-search" class="btn-ghost" type="button">Directory Searching</button>
+          <button id="dir-search" class="btn-ghost" type="button">Directory Search</button>
 
         </form>
 
@@ -92,6 +92,14 @@
         <div id="card-manage" class="card big selectable" role="button" tabindex="0" aria-pressed="false" aria-label="Manage Case">
           <div class="icon"><i class="fa-solid fa-file-arrow-up"></i></div>
           <div class="label">Manage Case</div>
+        </div>
+        <div id="card-upload-case-law" class="card big selectable" role="button" tabindex="0" aria-pressed="false" aria-label="Upload Case Law">
+          <div class="icon"><i class="fa-solid fa-gavel"></i></div>
+          <div class="label">Upload Case Law</div>
+        </div>
+        <div id="card-search-case-law" class="card big selectable" role="button" tabindex="0" aria-pressed="false" aria-label="Search Case Law">
+          <div class="icon"><i class="fa-solid fa-scale-balanced"></i></div>
+          <div class="label">Search Case Law</div>
         </div>
       </section>
 
@@ -153,4 +161,3 @@
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
-

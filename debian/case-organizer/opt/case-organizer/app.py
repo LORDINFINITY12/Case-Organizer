@@ -1,18 +1,19 @@
-
 from __future__ import annotations
 
 import os
 import re
+import sqlite3
 import shutil
+from contextlib import contextmanager
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Iterable, Optional
 
 from flask import (
     Flask, request, jsonify, session, redirect, url_for,
-    render_template, render_template_string, flash, send_file
+    render_template, render_template_string, flash, send_file, g
 )
 from werkzeug.utils import secure_filename
 
@@ -30,6 +31,24 @@ SECRET_KEY = getattr(config, "SECRET_KEY", "dev-local-secret-key")
 ALLOWED_EXTENSIONS = set(getattr(config, "ALLOWED_EXTENSIONS", []))
 
 
+CASE_LAW_ROOT_NAME = "Case Law"
+CASE_LAW_DB_NAME = "case_law_index.db"
+CASE_LAW_PRIMARY_TYPES = ("Criminal", "Civil", "Commercial")
+CASE_LAW_CASE_TYPES = {
+    "Criminal": [
+        "498A (Cruelty/Dowry)", "Murder", "Rape", "Sexual Harassment", "Hurt",
+        "138 NI Act", "Fraud", "Human Trafficking", "NDPS", "PMLA", "POCSO", "Constitutional", "Others"
+    ],
+    "Civil": [
+        "Property", "Rent Control", "Inheritance/Succession", "Contract",
+        "Marital Divorce", "Marital Maintenance", "Marital Guardianship", "Constitutional", "Others"
+    ],
+    "Commercial": [
+        "Trademark", "Copyright", "Patent", "Banking", "Others"
+    ],
+}
+
+
 # ---- Flask setup --------------------------------------------------------
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
@@ -42,6 +61,127 @@ def ensure_root() -> None:
     """Create the storage root if configured."""
     if FS_ROOT:
         FS_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def _case_law_root() -> Path:
+    if not FS_ROOT:
+        raise RuntimeError("Storage root is not configured yet")
+    root = FS_ROOT / CASE_LAW_ROOT_NAME
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _case_law_db_file() -> Path:
+    ensure_root()
+    root = FS_ROOT
+    if not root:
+        raise RuntimeError("Storage root is not configured yet")
+    return root / CASE_LAW_DB_NAME
+
+
+def _ensure_case_law_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS case_law (
+            id INTEGER PRIMARY KEY,
+            petitioner TEXT NOT NULL,
+            respondent TEXT NOT NULL,
+            citation TEXT NOT NULL,
+            decision_year INTEGER NOT NULL,
+            decision_month TEXT,
+            primary_type TEXT NOT NULL,
+            subtype TEXT NOT NULL,
+            folder_rel TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            note_path_rel TEXT NOT NULL,
+            note_text TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(petitioner, respondent, citation, primary_type, subtype, decision_year)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS case_law_fts USING fts5(
+            content,
+            petitioner,
+            respondent,
+            citation,
+            note,
+            case_id UNINDEXED
+        )
+        """
+    )
+
+
+def get_case_law_db() -> sqlite3.Connection:
+    if 'case_law_db' not in g:
+        path = _case_law_db_file()
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        conn.execute('PRAGMA foreign_keys = ON')
+        _ensure_case_law_schema(conn)
+        g.case_law_db = conn
+    return g.case_law_db
+
+
+@app.teardown_appcontext
+def close_case_law_db(_: Optional[BaseException]) -> None:
+    conn = g.pop('case_law_db', None)
+    if conn is not None:
+        conn.close()
+
+
+def refresh_case_law_index(
+    conn: sqlite3.Connection,
+    case_id: int,
+    judgement_text: str,
+    petitioner: str,
+    respondent: str,
+    citation: str,
+    note_text: str,
+) -> None:
+    conn.execute("DELETE FROM case_law_fts WHERE rowid = ?", (case_id,))
+    conn.execute(
+        """
+        INSERT INTO case_law_fts(rowid, content, petitioner, respondent, citation, note, case_id)
+        VALUES(?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            case_id,
+            judgement_text or "",
+            petitioner,
+            respondent,
+            citation,
+            note_text or "",
+            case_id,
+        ),
+    )
+
+
+_NEAR_RE = re.compile(r'("[^"]+"|\S+)\s+NEAR/(\d+)\s+("[^"]+"|\S+)', re.IGNORECASE)
+_BOOLEAN_OPERATORS = {
+    "and": "AND",
+    "or": "OR",
+    "not": "NOT",
+    "near": "NEAR",
+}
+
+
+def normalize_boolean_query(raw: str) -> str:
+    query = normalize_ws(raw)
+    if not query:
+        return ""
+
+    def _near_sub(match: re.Match) -> str:
+        left, distance, right = match.groups()
+        return f"NEAR({left} {right}, {distance})"
+
+    query = _NEAR_RE.sub(_near_sub, query)
+    for lower, upper in _BOOLEAN_OPERATORS.items():
+        query = re.sub(rf"\b{lower}\b", upper, query, flags=re.IGNORECASE)
+    return query
 
 @app.before_request
 def _require_setup():
@@ -175,6 +315,123 @@ def ddmmyyyy(dt: datetime) -> str:
 def normalize_ws(s: str) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
 
+
+_ILLEGAL_FS_CHARS = re.compile(r"[\\/:*?\"<>|]")
+
+
+def sanitize_case_law_component(text: str, replacement: str = " ") -> str:
+    cleaned = normalize_ws(text)
+    cleaned = _ILLEGAL_FS_CHARS.sub(replacement, cleaned)
+    cleaned = normalize_ws(cleaned)
+    return cleaned
+
+
+def build_case_law_display_name(petitioner: str, respondent: str, citation: str) -> str:
+    return f"{petitioner} vs {respondent} [{citation}]"
+
+
+def ensure_unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    parent = path.parent
+    counter = 1
+    while True:
+        candidate = parent / f"{stem} ({counter}){suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def normalize_primary_type(value: str) -> Optional[str]:
+    candidate = normalize_ws(value)
+    for option in CASE_LAW_PRIMARY_TYPES:
+        if candidate.lower() == option.lower():
+            return option
+    return None
+
+
+def normalize_case_type(primary: str, value: str) -> Optional[str]:
+    pool = CASE_LAW_CASE_TYPES.get(primary)
+    if not pool:
+        return None
+    candidate = normalize_ws(value)
+    for option in pool:
+        if candidate.lower() == option.lower():
+            return option
+    return None
+
+
+def case_law_error(message: str, status: int = 400):
+    return jsonify({"ok": False, "msg": message}), status
+
+
+def short_excerpt(text: str, limit: int = 200) -> str:
+    if not text:
+        return ""
+    compact = normalize_ws(text)
+    if len(compact) <= limit:
+        return compact
+    return compact[: max(0, limit - 1)].rstrip() + "…"
+
+
+def extract_note_summary(content: str) -> str:
+    raw = content or ""
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            for key in ("Note", "note", "Summary", "summary", "Additional Notes", "additional_notes"):
+                value = parsed.get(key)
+                if isinstance(value, str) and value.strip():
+                    return normalize_ws(value)
+    except json.JSONDecodeError:
+        pass
+    return normalize_ws(raw)
+
+
+def fetch_case_law_record(conn: sqlite3.Connection, case_id: int) -> Optional[sqlite3.Row]:
+    return conn.execute("SELECT * FROM case_law WHERE id = ?", (case_id,)).fetchone()
+
+
+def case_law_file_path(row: sqlite3.Row) -> Path:
+    base = (FS_ROOT / row["folder_rel"]).resolve()
+    full = (base / row["file_name"]).resolve()
+    root = FS_ROOT.resolve()
+    if not str(full).startswith(str(root)):
+        raise RuntimeError("Resolved file path escapes storage root")
+    return full
+
+
+def case_law_note_path(row: sqlite3.Row) -> Path:
+    note = (FS_ROOT / row["note_path_rel"]).resolve()
+    root = FS_ROOT.resolve()
+    if not str(note).startswith(str(root)):
+        raise RuntimeError("Resolved note path escapes storage root")
+    return note
+
+
+def serialize_case_law(row: sqlite3.Row, text_preview: str = "") -> Dict[str, Any]:
+    return {
+        "id": row["id"],
+        "petitioner": row["petitioner"],
+        "respondent": row["respondent"],
+        "citation": row["citation"],
+        "decision_year": row["decision_year"],
+        "decision_month": row["decision_month"],
+        "primary_type": row["primary_type"],
+        "case_type": row["case_type"],
+        "folder": row["folder_rel"],
+        "file_name": row["file_name"],
+        "note_path": row["note_path_rel"],
+        "note_preview": short_excerpt(row["note_text"]),
+        "text_preview": short_excerpt(text_preview or row["note_text"]),
+        "download_url": url_for("case_law_download", case_id=row["id"]),
+        "note_url": url_for("case_law_note", case_id=row["id"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
 def case_dir(year: int, month_str: str, case_name: str) -> Path:
     return FS_ROOT / f"{year}" / month_str / case_name
 
@@ -205,6 +462,26 @@ def build_case_name_from_parties(petitioner: str, respondent: str) -> str:
     pn = normalize_ws(petitioner)
     rn = normalize_ws(respondent)
     return f"{pn} v. {rn}" if pn and rn else ""
+
+
+def extract_text_for_index(file_path: Path) -> str:
+    suffix = file_path.suffix.lower()
+    try:
+        if suffix == ".pdf":
+            from pdfminer.high_level import extract_text  # type: ignore
+
+            return extract_text(str(file_path))
+        if suffix == ".txt":
+            return file_path.read_text(encoding="utf-8", errors="ignore")
+        if suffix == ".docx":
+            from docx import Document  # type: ignore
+
+            doc = Document(str(file_path))
+            return "\n".join(p.text for p in doc.paragraphs)
+    except Exception as exc:
+        print(f"[case-law] Failed to extract text from {file_path}: {exc}")
+    return ""
+
 
 def make_note_json(payload: Dict[str, Any]) -> str:
     """
@@ -667,31 +944,502 @@ def search():
 
     return jsonify({"results": results})
 
+# ---- delete-file --------------------------------
 
-# ---- View/Edit Note.json --------------------------------
-@app.route("/view_note/<year>/<month>/<case_name>", methods=["GET", "POST"])
-def view_note(year, month, case_name):
+
+@app.post("/api/delete-file")
+def api_delete_file():
+    """
+    Delete a file under FS_ROOT, given JSON:
+      {"path": "/full/path/inside/FS_ROOT/.."}
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        raw = (data.get("path") or "").strip()
+        if not raw:
+            return jsonify({"ok": False, "msg": "Missing 'path'"}), 400
+
+        target = Path(raw).resolve(strict=True)
+        root = FS_ROOT.resolve()
+        if not str(target).startswith(str(root)):
+            return jsonify({"ok": False, "msg": "Not found"}), 404
+        if not target.is_file():
+            return jsonify({"ok": False, "msg": "Not a file"}), 400
+
+        target.unlink()
+        return jsonify({"ok": True})
+    except FileNotFoundError:
+        return jsonify({"ok": False, "msg": "File not found"}), 404
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Delete failed: {e}"}), 500
+
+
+# ---- Case Law Upload & Search -------------------------------------------
+
+
+@app.post("/case-law/upload")
+def case_law_upload():
+    if not FS_ROOT:
+        return case_law_error("Storage root is not configured yet.")
+
+    ensure_root()
+
+    form = request.form
+    petitioner = normalize_ws(form.get("petitioner") or "")
+    respondent = normalize_ws(form.get("respondent") or "")
+    citation = normalize_ws(form.get("citation") or "")
+    decision_year_raw = normalize_ws(form.get("decision_year") or "")
+    primary_raw = normalize_ws(form.get("primary_type") or "")
+    case_type_raw = normalize_ws(form.get("case_type") or form.get("subtype") or "")
+    note_text = (form.get("note") or "").strip()
+
+    if not petitioner:
+        return case_law_error("Petitioner name is required.")
+    if not respondent:
+        return case_law_error("Respondent name is required.")
+    if not citation:
+        return case_law_error("Citation is required.")
+
+    try:
+        decision_year = int(decision_year_raw)
+    except ValueError:
+        return case_law_error("Decision year must be a number.")
+
+    current_year = datetime.now().year
+    if decision_year < 1800 or decision_year > current_year + 1:
+        return case_law_error("Decision year looks invalid.")
+
+    decision_month = ""
+
+    primary = normalize_primary_type(primary_raw)
+    if not primary:
+        return case_law_error("Primary classification must be Civil, Criminal, or Commercial.")
+
+    case_type = normalize_case_type(primary, case_type_raw)
+    if not case_type:
+        return case_law_error("Please select a valid case type for the chosen classification.")
+
+    if not note_text:
+        return case_law_error("An additional note is required for case law entries.")
+
+    upload = request.files.get("file")
+    if not upload or upload.filename == "":
+        return case_law_error("Attach the judgment file to upload.")
+
+    if "." not in upload.filename:
+        return case_law_error("The uploaded file must include an extension.")
+
+    ext = upload.filename.rsplit(".", 1)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return case_law_error(f"File type '.{ext}' is not allowed.")
+
+    conn = get_case_law_db()
+    existing = conn.execute(
+        """
+        SELECT id FROM case_law
+        WHERE petitioner = ? AND respondent = ? AND citation = ?
+          AND primary_type = ? AND subtype = ? AND decision_year = ?
+        """,
+        (petitioner, respondent, citation, primary, case_type, decision_year),
+    ).fetchone()
+    if existing:
+        return case_law_error("A case law record with the same metadata already exists.", 409)
+
+    display_name = build_case_law_display_name(petitioner, respondent, citation)
+    safe_case_name = sanitize_case_law_component(display_name) or f"Case Law {decision_year}"
+
+    case_law_root = _case_law_root()
+    primary_segment = sanitize_case_law_component(primary, replacement="-") or "General"
+    type_segment = sanitize_case_law_component(case_type, replacement="-") or "General"
+    base_dir = case_law_root / primary_segment / type_segment / str(decision_year)
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    case_dir = ensure_unique_path(base_dir / safe_case_name)
+    case_dir.mkdir(exist_ok=False)
+
+    tmp_name = secure_filename(f"upload_{datetime.now().timestamp()}_{upload.filename}")
+    tmp_path = case_dir / tmp_name
+    upload.save(tmp_path)
+
+    target_file = case_dir / f"{safe_case_name}.{ext}"
+    target_file = ensure_unique_path(target_file)
+    tmp_path.rename(target_file)
+
+    note_payload = {
+        "Petitioner": petitioner,
+        "Respondent": respondent,
+        "Citation": citation,
+        "Decision Year": decision_year,
+        "Primary Type": primary,
+        "Case Type": case_type,
+        "Note": note_text,
+        "Saved At": datetime.now().isoformat(timespec="seconds"),
+    }
+    note_json = json.dumps(note_payload, indent=2)
+
+    note_file = case_dir / "note.json"
+    note_file.write_text(note_json, encoding="utf-8")
+
+    judgement_text = extract_text_for_index(target_file)
+    folder_rel = str(case_dir.relative_to(FS_ROOT))
+    note_rel = str(note_file.relative_to(FS_ROOT))
+
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO case_law (
+                petitioner, respondent, citation, decision_year, decision_month,
+                primary_type, subtype, folder_rel, file_name, note_path_rel, note_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                petitioner,
+                respondent,
+                citation,
+                decision_year,
+                decision_month,
+                primary,
+                case_type,
+                folder_rel,
+                target_file.name,
+                note_rel,
+                note_text,
+            ),
+        )
+        case_id = cur.lastrowid
+        refresh_case_law_index(
+            conn,
+            case_id,
+            judgement_text,
+            petitioner,
+            respondent,
+            citation,
+            note_json,
+        )
+        conn.commit()
+    except Exception as exc:
+        shutil.rmtree(case_dir, ignore_errors=True)
+        raise exc
+
+    return jsonify({
+        "ok": True,
+        "case_id": case_id,
+        "folder": folder_rel,
+        "file": target_file.name,
+        "note": note_rel,
+    })
+
+
+@app.get("/case-law/search")
+def case_law_search():
+    if not FS_ROOT:
+        return jsonify({"results": [], "filters": {}})
+
+    conn = get_case_law_db()
+    params: list[Any] = []
+    where: list[str] = []
+    join_fts = False
+
+    text_query_raw = request.args.get("text") or ""
+    text_query = normalize_ws(text_query_raw)
+    if text_query:
+        fts_query = normalize_boolean_query(text_query)
+        if not fts_query:
+            return jsonify({"results": []})
+        join_fts = True
+        where.append("c.id IN (SELECT rowid FROM case_law_fts WHERE case_law_fts MATCH ?)")
+        params.append(fts_query)
+
+    party_raw = normalize_ws(request.args.get("party") or "")
+    party_mode = normalize_ws(request.args.get("party_mode") or "either")
+    if party_raw:
+        like = f"%{party_raw.lower()}%"
+        if party_mode == "petitioner":
+            where.append("LOWER(c.petitioner) LIKE ?")
+            params.append(like)
+        elif party_mode == "respondent":
+            where.append("LOWER(c.respondent) LIKE ?")
+            params.append(like)
+        else:
+            where.append("(LOWER(c.petitioner) LIKE ? OR LOWER(c.respondent) LIKE ?)")
+            params.extend([like, like])
+
+    citation_raw = normalize_ws(request.args.get("citation") or "")
+    if citation_raw:
+        where.append("LOWER(c.citation) LIKE ?")
+        params.append(f"%{citation_raw.lower()}%")
+
+    year_raw = normalize_ws(request.args.get("year") or "")
+    if year_raw:
+        try:
+            year_val = int(year_raw)
+        except ValueError:
+            return jsonify({"results": [], "error": "Invalid year filter supplied."}), 400
+        where.append("c.decision_year = ?")
+        params.append(year_val)
+
+    primary_raw = normalize_ws(request.args.get("primary_type") or "")
+    if primary_raw:
+        primary = normalize_primary_type(primary_raw)
+        if not primary:
+            return jsonify({"results": [], "error": "Invalid primary classification."}), 400
+        where.append("c.primary_type = ?")
+        params.append(primary)
+
+    case_type_raw = normalize_ws(request.args.get("case_type") or "")
+    if case_type_raw and primary_raw:
+        primary = normalize_primary_type(primary_raw)
+        case_type = normalize_case_type(primary or "", case_type_raw)
+        if not case_type:
+            return jsonify({"results": [], "error": "Invalid case type supplied."}), 400
+        where.append("c.subtype = ?")
+        params.append(case_type)
+
+    try:
+        limit = int(request.args.get("limit", "50"))
+    except ValueError:
+        limit = 50
+    limit = max(1, min(limit, 200))
+
+    select_fields = [
+        "c.id",
+        "c.petitioner",
+        "c.respondent",
+        "c.citation",
+        "c.decision_year",
+        "c.decision_month",
+        "c.primary_type",
+        "c.subtype AS case_type",
+        "c.folder_rel",
+        "c.file_name",
+        "c.note_path_rel",
+        "c.note_text",
+        "c.created_at",
+        "c.updated_at",
+    ]
+
+    select_fields.append("'' AS fts_content")
+
+    sql = "SELECT " + ", ".join(select_fields) + " FROM case_law c"
+
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+
+    sql += " ORDER BY c.decision_year DESC, c.created_at DESC LIMIT ?"
+    params.append(limit)
+
+    rows = conn.execute(sql, params).fetchall()
+    results = [
+        serialize_case_law(row, row["fts_content"]) for row in rows
+    ]
+
+    years = [r[0] for r in conn.execute("SELECT DISTINCT decision_year FROM case_law ORDER BY decision_year DESC").fetchall()]
+    return jsonify({
+        "results": results,
+        "filters": {
+            "years": years,
+            "primary_types": list(CASE_LAW_PRIMARY_TYPES),
+            "case_types": CASE_LAW_CASE_TYPES,
+        },
+    })
+
+
+@app.get("/case-law/<int:case_id>/download")
+def case_law_download(case_id: int):
+    if not FS_ROOT:
+        return "Not found", 404
+
+    conn = get_case_law_db()
+    row = fetch_case_law_record(conn, case_id)
+    if not row:
+        return "Not found", 404
+
+    try:
+        file_path = case_law_file_path(row)
+    except Exception:
+        return "Not found", 404
+
+    if not file_path.exists():
+        return "Not found", 404
+
+    return send_file(file_path, as_attachment=True)
+
+
+@app.route("/case-law/<int:case_id>/note", methods=["GET", "POST"])
+def case_law_note(case_id: int):
+    if not FS_ROOT:
+        return case_law_error("Storage root is not configured yet.")
+
+    conn = get_case_law_db()
+    row = fetch_case_law_record(conn, case_id)
+    if not row:
+        return case_law_error("Case law record not found.", 404)
+
+    try:
+        note_path = case_law_note_path(row)
+    except Exception:
+        return case_law_error("Invalid note path for this record."), 400
+
+    if request.method == "GET":
+        content = note_path.read_text(encoding="utf-8") if note_path.exists() else ""
+        return jsonify({
+            "ok": True,
+            "content": content,
+            "summary": row["note_text"],
+        })
+
+    data = request.get_json(silent=True) or {}
+    content = data.get("content", "")
+    summary = extract_note_summary(content)
+
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text(content, encoding="utf-8")
+
+    judgement_row = conn.execute("SELECT content FROM case_law_fts WHERE rowid = ?", (case_id,)).fetchone()
+    judgement_text = judgement_row["content"] if judgement_row else ""
+
+    refresh_case_law_index(
+        conn,
+        case_id,
+        judgement_text,
+        row["petitioner"],
+        row["respondent"],
+        row["citation"],
+        content,
+    )
+
+    conn.execute(
+        "UPDATE case_law SET note_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (summary, case_id),
+    )
+    conn.commit()
+
+    return jsonify({"ok": True, "summary": summary})
+
+
+# ---- Directory Search --------------------------
+
+@app.get("/api/dir-tree")
+def api_dir_tree():
+    """
+    List directory contents starting from FS_ROOT.
+    Query param:
+      path: relative path under FS_ROOT (optional)
+    Returns:
+      { "dirs": [names], "files": [ {name, path} ] }
+    """
+    rel = (request.args.get("path") or "").strip()
+    base = FS_ROOT
+    try:
+        if rel:
+            base = (FS_ROOT / rel).resolve()
+            # enforce FS_ROOT jail
+            if not str(base).startswith(str(FS_ROOT.resolve())):
+                return jsonify({"dirs": [], "files": []})
+        if not base.exists() or not base.is_dir():
+            return jsonify({"dirs": [], "files": []})
+
+        dirs = []
+        files = []
+        for entry in sorted(base.iterdir(), key=lambda p: p.name.lower()):
+            if entry.is_dir():
+                dirs.append(entry.name)
+            elif entry.is_file():
+                if "." in entry.name and entry.name.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS:
+                    files.append({"name": entry.name, "path": str(entry)})
+        return jsonify({"dirs": dirs, "files": files})
+    except Exception as e:
+        return jsonify({"dirs": [], "files": [], "error": str(e)}), 500
+
+
+# ---- API: fetch Note.json content (for modal) --------------------------
+@app.route("/api/note/<year>/<month>/<case_name>", methods=["POST"])
+def api_update_note(year, month, case_name):
     cdir = FS_ROOT / year / month / case_name
     note_path = cdir / "Note.json"
 
-    if request.method == "POST":
-        new_content = request.form.get("note_content", "")
-        try:
-            # validate JSON
-            data = json.loads(new_content)
-            note_path.write_text(json.dumps(data, indent=4), encoding="utf-8")
-            flash("Note.json updated successfully!", "success")
-        except Exception as e:
-            flash(f"Invalid JSON: {e}", "error")
+    if not note_path.exists():
+        template = make_note_json({})
+        return jsonify({"ok": False, "msg": "Note.json not found", "template": template}), 404
 
-    if note_path.exists():
-        content = note_path.read_text(encoding="utf-8")
+    data = request.get_json(silent=True) or {}
+    content = data.get("content", "")
+    try:
+        note_path.write_text(content, encoding="utf-8")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Write failed: {e}"}), 500
+
+
+
+# ---- API: Create Note.json --------------------------------
+@app.post("/api/create-note")
+def api_create_note():
+    data = request.get_json(silent=True) or {}
+    case_path = (data.get("case_path") or "").strip()
+    if case_path:
+        parts = Path(case_path).parts
+        if len(parts) < 3:
+            return jsonify({"ok": False, "msg": "Invalid case_path"}), 400
+        year, month, case = parts[-3], parts[-2], parts[-1]
     else:
-        content = "{}"
+        year  = (data.get("year") or "").strip()
+        month = (data.get("month") or "").strip()
+        case  = normalize_ws(data.get("case") or "")
 
-    return render_template("view_note.html",
-                           year=year, month=month, case_name=case_name,
-                           content=content)
+    if not (year and month and case):
+        return jsonify({"ok": False, "msg": "Year, month, and case are required"}), 400
+
+    cdir = (FS_ROOT / year / month / case).resolve()
+    root = FS_ROOT.resolve()
+    if not str(cdir).startswith(str(root)):
+        return jsonify({"ok": False, "msg": "Invalid path"}), 400
+    if not cdir.exists():
+        return jsonify({"ok": False, "msg": "Case folder not found"}), 404
+
+    note_file = cdir / "Note.json"
+    if note_file.exists():
+        return jsonify({"ok": False, "msg": "Note.json already exists"}), 400
+
+    content = data.get("content") or ""
+
+    payload: Dict[str, Any] = {}
+    if content.strip():
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                payload = parsed
+            else:
+                payload = {"Additional Notes": content}
+        except json.JSONDecodeError:
+            payload = {"Additional Notes": content}
+
+    try:
+        text_out = make_note_json(payload)
+        note_file.write_text(text_out, encoding="utf-8")
+        return jsonify({"ok": True, "path": str(note_file)})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Write failed: {e}"}), 500
+
+@app.route("/api/note/<year>/<month>/<case_name>", methods=["GET", "POST"])
+def api_note(year, month, case_name):
+    cdir = FS_ROOT / year / month / case_name
+    note_path = cdir / "Note.json"
+    if not note_path.exists():
+        template = make_note_json({})
+        return jsonify({"ok": False, "msg": "Note.json not found", "template": template}), 404
+
+    if request.method == "GET":
+        content = note_path.read_text(encoding="utf-8")
+        return jsonify({"ok": True, "content": content, "template": make_note_json({})})
+
+    data = request.get_json(silent=True) or {}
+    content = data.get("content", "")
+    try:
+        note_path.write_text(content, encoding="utf-8")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Write failed: {e}"}), 500
 
 
 
@@ -704,4 +1452,3 @@ if __name__ == "__main__":
         print(f"  {r.rule:22s} [{methods}]")
     print()
     app.run(host="0.0.0.0", port=5000, debug=True)
-

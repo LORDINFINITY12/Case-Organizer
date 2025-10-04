@@ -17,6 +17,11 @@
 function $(sel){ return document.querySelector(sel); }
 function el(tag, cls){ const e=document.createElement(tag); if(cls) e.className=cls; return e; }
 
+const HTML_ESCAPE = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(value){
+  return String(value ?? '').replace(/[&<>"']/g, ch => HTML_ESCAPE[ch] || ch);
+}
+
 // --- Data: subcategories & case types ----------------------------------
 const SUBCATS = {
   Criminal: [
@@ -40,11 +45,11 @@ const SUBCATS = {
 const CASE_TYPES = {
   Criminal: [
     "498A (Cruelty/Dowry)","Murder","Rape","Sexual Harassment","Hurt",
-    "138 NI Act","Fraud","Human Trafficking","NDPS","PMLA","POCSO","Others"
+    "138 NI Act","Fraud","Human Trafficking","NDPS","PMLA","POCSO","Constitutional","Others"
   ],
   Civil: [
     "Property","Rent Control","Inheritance/Succession","Contract",
-    "Marital Divorce","Marital Maintenance","Marital Guardianship","Others"
+    "Marital Divorce","Marital Maintenance","Marital Guardianship","Constitutional","Others"
   ],
   Commercial: [
     "Trademark","Copyright","Patent","Banking","Others"
@@ -99,6 +104,20 @@ function populateOptions(select, arr, placeholder="Select"){
     select.append(o);
   });
   select.disabled = false;
+}
+
+function openNotesModal(content, intent = 'update', context = null){
+  if (typeof window._openNotesWith === 'function') {
+    window._openNotesWith(content || '', intent || 'update', context || null);
+    return;
+  }
+  const modal = document.getElementById('notesModal');
+  const editor = document.getElementById('notesEditor');
+  if (!modal || !editor) return;
+  editor.value = content || '';
+  editor.style.display = 'block';
+  modal.removeAttribute('hidden');
+  modal.setAttribute('aria-hidden','false');
 }
 
 // --- Search helpers -----------------------------------------------------
@@ -449,9 +468,36 @@ function buildResultItem(rec) {
   return row;
 }
 
+function cloneResults(list) {
+  if (!Array.isArray(list)) return null;
+  return list.map(item => ({ ...item }));
+}
+
+let lastRenderedResults = null;
+
+const dirSearchState = {
+  active: false,
+  previousScroll: 0,
+  currentPath: ''
+};
+
 function renderResults(list) {
   const host = document.getElementById('results');
   if (!host) return;
+
+  if (dirSearchState.active) {
+    dirSearchState.active = false;
+    dirSearchState.previousScroll = 0;
+    dirSearchState.currentPath = '';
+    const dirBtn = document.getElementById('dir-search');
+    if (dirBtn) {
+      dirBtn.classList.remove('active');
+      dirBtn.textContent = 'Directory Search';
+      dirBtn.setAttribute('aria-pressed', 'false');
+    }
+  }
+
+  lastRenderedResults = cloneResults(list);
   host.innerHTML = '';
   if (!list || !list.length) {
     const empty = document.createElement('div');
@@ -465,8 +511,11 @@ function renderResults(list) {
 
 // ------------- Directory tree (optional button #dir-search) -------------
 async function showDirLevel(relPath) {
+  if (!dirSearchState.active) return;
   const results = document.getElementById('results');
   if (!results) return;
+
+  dirSearchState.currentPath = relPath || '';
 
   const url = new URL('/api/dir-tree', location.origin);
   if (relPath) url.searchParams.set('path', relPath);
@@ -474,6 +523,7 @@ async function showDirLevel(relPath) {
   try {
     const resp = await fetch(url.toString());
     const data = await resp.json().catch(() => ({}));
+    if (!dirSearchState.active) return;
     results.innerHTML = '';
 
     // Up directory
@@ -517,6 +567,7 @@ async function showDirLevel(relPath) {
       results.appendChild(empty);
     }
   } catch (e) {
+    if (!dirSearchState.active) return;
     results.innerHTML = `<div class="result-item">Error: ${e}</div>`;
   }
 }
@@ -777,22 +828,6 @@ function manageCaseForm(){
       }
   }
 
-  function openNotesModalEditable(content, intent){
-      if (typeof window._openNotesWith === 'function') {
-          window._openNotesWith(content || '', intent || 'update');
-          return;
-      }
-      // Fallback if global handlers have not bound yet.
-      const modal  = document.getElementById('notesModal');
-      const editor = document.getElementById('notesEditor');
-      if (!modal || !editor) return;
-      editor.value = content || '';
-      editor.style.display = 'block';
-      modal.removeAttribute('hidden');
-      modal.setAttribute('aria-hidden','false');
-      editor.focus();
-  }
-
   async function updateNoteButtonVisibility() {
       if (!noteBtn) return;
       const year  = yearSel.value || '';
@@ -821,14 +856,26 @@ function manageCaseForm(){
                   updateNoteButtonVisibility();
                   return;
               }
-              openNotesModalEditable(currentState.content || '', 'update');
+              const context = {
+                  kind: 'case',
+                  year: yearSel.value || '',
+                  month: monthSel.value || '',
+                  caseName: caseSel.value || ''
+              };
+              openNotesModal(currentState.content || '', 'update', context);
           };
       } else {
           noteBtn.textContent = 'Create Note.json';
           noteBtn.onclick = async () => {
               const currentState = await getNoteState(yearSel.value || '', monthSel.value || '', caseSel.value || '');
               const template = currentState.template || defaultNoteTemplate();
-              openNotesModalEditable(template, currentState.exists ? 'update' : 'create');
+              const context = {
+                  kind: 'case',
+                  year: yearSel.value || '',
+                  month: monthSel.value || '',
+                  caseName: caseSel.value || ''
+              };
+              openNotesModal(template, currentState.exists ? 'update' : 'create', context);
           };
       }
   }
@@ -945,6 +992,493 @@ function manageCaseForm(){
   renderSelected();
 }
 
+function caseLawUploadForm(){
+  const host = $('#form-host');
+  if (!host) return;
+  host.innerHTML = '';
+
+  const wrap = el('div', 'form-card');
+  wrap.innerHTML = `
+    <h3>Upload Case Law</h3>
+    <div class="form-grid">
+      <input type="text" id="clu-petitioner" placeholder="Petitioner Name" />
+      <input type="text" id="clu-respondent" placeholder="Respondent Name" />
+      <input type="text" id="clu-citation" placeholder="Citation" />
+      <select id="clu-year"><option value="">Decision Year</option></select>
+      <div class="clu-type-row full-span">
+        <select id="clu-primary"><option value="">Primary Type</option></select>
+        <select id="clu-case-type" disabled><option value="">Case Type</option></select>
+        <label class="file-field" for="clu-file">
+          <input type="file" id="clu-file" class="file-input" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.json" />
+          <span id="clu-file-label">Select judgment file…</span>
+          <button type="button" class="btn-secondary file-btn" id="clu-file-btn">Browse</button>
+        </label>
+      </div>
+      <textarea id="clu-note" class="full-span" rows="4" placeholder="Brief Note / Summary"></textarea>
+    </div>
+    <div class="form-actions">
+      <button id="clu-submit" class="btn-primary" type="button">Upload Case Law</button>
+    </div>
+  `;
+  host.append(wrap);
+
+  const primarySel = $('#clu-primary');
+  const caseTypeSel = $('#clu-case-type');
+  const yearSel = $('#clu-year');
+
+  if (primarySel) {
+    populateOptions(primarySel, Object.keys(CASE_TYPES), 'Primary Type');
+  }
+
+  if (yearSel) {
+    yearSel.innerHTML = '<option value="">Decision Year</option>';
+    const currentYear = new Date().getFullYear();
+    for (let y = currentYear; y >= 1950; y--) {
+      const opt = el('option');
+      opt.value = String(y);
+      opt.textContent = String(y);
+      yearSel.append(opt);
+    }
+  }
+
+  if (caseTypeSel) {
+    caseTypeSel.innerHTML = '<option value="">Case Type</option>';
+    caseTypeSel.disabled = true;
+  }
+
+  primarySel?.addEventListener('change', () => {
+    const val = primarySel.value || '';
+    if (val && CASE_TYPES[val]) {
+      populateOptions(caseTypeSel, CASE_TYPES[val], 'Case Type');
+    } else if (caseTypeSel) {
+      caseTypeSel.innerHTML = '<option value="">Case Type</option>';
+      caseTypeSel.disabled = true;
+    }
+  });
+
+  const fileInput = document.getElementById('clu-file');
+  const fileLabel = document.getElementById('clu-file-label');
+  const fileBtn = document.getElementById('clu-file-btn');
+  const fileField = wrap.querySelector('.file-field');
+  if (fileBtn && fileInput) {
+    fileBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files?.[0];
+      fileLabel.textContent = file ? file.name : 'Select judgment file…';
+    });
+  }
+
+  if (fileField && fileInput) {
+    const setFile = (file) => {
+      if (!file) return;
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+      fileLabel.textContent = file.name;
+    };
+
+    ['dragenter','dragover'].forEach(evt => {
+      fileField.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        fileField.classList.add('dragover');
+      });
+    });
+
+    ['dragleave','dragend'].forEach(evt => {
+      fileField.addEventListener(evt, () => {
+        fileField.classList.remove('dragover');
+      });
+    });
+
+    fileField.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const files = e.dataTransfer?.files;
+      if (files && files.length) {
+        setFile(files[0]);
+      }
+      fileField.classList.remove('dragover');
+    });
+  }
+
+  const submitBtn = $('#clu-submit');
+  submitBtn?.addEventListener('click', async () => {
+    const petitioner = ($('#clu-petitioner')?.value || '').trim();
+    const respondent = ($('#clu-respondent')?.value || '').trim();
+    const citation = ($('#clu-citation')?.value || '').trim();
+    const year = ($('#clu-year')?.value || '').trim();
+    const primary = ($('#clu-primary')?.value || '').trim();
+    const caseType = ($('#clu-case-type')?.value || '').trim();
+    const note = ($('#clu-note')?.value || '').trim();
+    const file = fileInput?.files?.[0];
+
+    if (!petitioner || !respondent) { alert('Petitioner and Respondent are required.'); return; }
+    if (!citation) { alert('Citation is required.'); return; }
+    if (!year) { alert('Decision year is required.'); return; }
+    if (!primary) { alert('Select a primary classification.'); return; }
+    if (!caseType) { alert('Select a case type.'); return; }
+    if (!note) { alert('Please provide a brief note.'); return; }
+    if (!file) { alert('Select a judgment file to upload.'); return; }
+
+    const fd = new FormData();
+    fd.set('petitioner', petitioner);
+    fd.set('respondent', respondent);
+    fd.set('citation', citation);
+    fd.set('decision_year', year);
+    fd.set('primary_type', primary);
+    fd.set('case_type', caseType);
+    fd.set('note', note);
+    fd.append('file', file);
+
+    try {
+      const resp = await fetch('/case-law/upload', { method: 'POST', body: fd });
+      const data = await resp.json().catch(()=>({}));
+      if (!resp.ok || !data.ok) {
+        throw new Error(data.msg || `HTTP ${resp.status}`);
+      }
+      alert('Case law uploaded successfully.');
+      ['clu-petitioner','clu-respondent','clu-citation','clu-note'].forEach(id => {
+        const elField = document.getElementById(id);
+        if (elField) elField.value = '';
+      });
+      if (primarySel) primarySel.selectedIndex = 0;
+      if (caseTypeSel) {
+        caseTypeSel.innerHTML = '<option value="">Case Type</option>';
+        caseTypeSel.disabled = true;
+      }
+      if (yearSel) yearSel.selectedIndex = 0;
+      if (fileInput) {
+        fileInput.value = '';
+        fileLabel.textContent = 'Select judgment file…';
+      }
+    } catch (err) {
+      alert(`Upload failed: ${err.message || err}`);
+    }
+  });
+}
+
+function caseLawSearchForm(){
+  const host = $('#form-host');
+  if (!host) return;
+  host.innerHTML = '';
+
+  const wrap = el('div', 'form-card');
+  wrap.innerHTML = `
+    <h3>Search Case Law</h3>
+    <div class="cl-search-modes" role="radiogroup" aria-label="Select case law search mode">
+      <label><input type="radio" name="cls-mode" value="name" checked> Search by Name</label>
+      <label><input type="radio" name="cls-mode" value="citation"> Search by Citation</label>
+      <label><input type="radio" name="cls-mode" value="year"> Search by Year</label>
+      <label><input type="radio" name="cls-mode" value="type"> Search by Type</label>
+      <label><input type="radio" name="cls-mode" value="advanced"> Advanced Search</label>
+    </div>
+    <div class="form-grid cls-form">
+      <div class="cls-mode-panel" data-mode="name">
+        <div class="cl-name-row">
+          <label class="cl-name-option">
+            <input type="radio" name="cls-name-mode" value="petitioner" data-target="cls-name-petitioner" checked>
+            <input type="text" id="cls-name-petitioner" class="cl-name-input" placeholder="Petitioner Name" />
+          </label>
+          <label class="cl-name-option">
+            <input type="radio" name="cls-name-mode" value="respondent" data-target="cls-name-respondent">
+            <input type="text" id="cls-name-respondent" class="cl-name-input" placeholder="Respondent Name" disabled />
+          </label>
+          <label class="cl-name-option">
+            <input type="radio" name="cls-name-mode" value="either" data-target="cls-name-either">
+            <input type="text" id="cls-name-either" class="cl-name-input" placeholder="Either Party Name" disabled />
+          </label>
+        </div>
+      </div>
+      <div class="cls-mode-panel" data-mode="citation" hidden>
+        <input type="text" id="cls-citation" placeholder="Citation" />
+      </div>
+      <div class="cls-mode-panel" data-mode="year" hidden>
+        <select id="cls-year"><option value="">Decision Year</option></select>
+      </div>
+      <div class="cls-mode-panel full-span" data-mode="type" hidden>
+        <div class="cls-type-row">
+          <select id="cls-primary"><option value="">Primary Type</option></select>
+          <select id="cls-case-type" disabled><option value="">Case Type</option></select>
+        </div>
+      </div>
+      <div class="cls-mode-panel full-span" data-mode="advanced" hidden>
+        <textarea id="cls-text" rows="3" placeholder="Enter boolean query, e.g. bail AND 498A NOT dowry or maintenance NEAR/5 interim"></textarea>
+        <p class="form-help">Boolean operators (AND/OR/NOT) and proximity syntax (term NEAR/5 term) are supported.</p>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button id="cls-search" class="btn-primary" type="button">Search</button>
+      <button id="cls-reset" class="btn-ghost" type="button">Reset</button>
+    </div>
+    <div id="cls-results" class="results"></div>
+  `;
+  host.append(wrap);
+
+  const resultsHost = $('#cls-results');
+  const radios = Array.from(document.querySelectorAll('input[name="cls-mode"]'));
+  const panels = Array.from(document.querySelectorAll('.cls-mode-panel'));
+
+  const nameModeRadios = Array.from(document.querySelectorAll('input[name="cls-name-mode"]'));
+  const citationInput = $('#cls-citation');
+  const yearSel = $('#cls-year');
+  const primarySel = $('#cls-primary');
+  const caseTypeSel = $('#cls-case-type');
+  const textInput = $('#cls-text');
+
+  if (primarySel) populateOptions(primarySel, Object.keys(CASE_TYPES), 'Primary Type');
+  if (caseTypeSel) {
+    caseTypeSel.innerHTML = '<option value="">Case Type</option>';
+    caseTypeSel.disabled = true;
+  }
+
+  function showPanel(mode){
+    panels.forEach(panel => {
+      panel.hidden = panel.dataset.mode !== mode;
+    });
+  }
+
+  function updateNameInputs(){
+    let activeInput = null;
+    nameModeRadios.forEach(radio => {
+      const targetId = radio.dataset.target;
+      const input = targetId ? document.getElementById(targetId) : null;
+      if (!input) return;
+      if (radio.checked) {
+        input.disabled = false;
+        activeInput = input;
+      } else {
+        input.disabled = true;
+      }
+    });
+    if (activeInput) {
+      activeInput.focus();
+    }
+  }
+
+  updateNameInputs();
+
+  nameModeRadios.forEach(radio => {
+    radio.addEventListener('change', () => {
+      if (document.querySelector('input[name="cls-mode"]:checked')?.value === 'name') {
+        updateNameInputs();
+      }
+    });
+  });
+
+  radios.forEach(radio => {
+    radio.addEventListener('change', () => {
+      if (radio.checked) {
+        showPanel(radio.value);
+        if (radio.value === 'advanced') {
+          textInput?.focus();
+        }
+        if (radio.value === 'name') {
+          updateNameInputs();
+        }
+        if (radio.value === 'type') {
+          if (primarySel && primarySel.childElementCount === 0) {
+            populateOptions(primarySel, Object.keys(CASE_TYPES), 'Primary Type');
+          }
+        } else {
+          if (caseTypeSel) {
+            caseTypeSel.disabled = true;
+          }
+        }
+        if (radio.value !== 'name') {
+          nameModeRadios.forEach(r => {
+            const targetId = r.dataset.target;
+            const input = targetId ? document.getElementById(targetId) : null;
+            if (input) {
+              input.disabled = true;
+            }
+          });
+        }
+      }
+    });
+  });
+
+  showPanel('name');
+
+  primarySel?.addEventListener('change', () => {
+    const val = primarySel.value || '';
+    if (val && CASE_TYPES[val]) {
+      populateOptions(caseTypeSel, CASE_TYPES[val], 'Case Type');
+    } else if (caseTypeSel) {
+      caseTypeSel.innerHTML = '<option value="">Case Type</option>';
+      caseTypeSel.disabled = true;
+    }
+  });
+
+  function applyFilters(filters){
+    if (yearSel) {
+      const selected = yearSel.value;
+      yearSel.innerHTML = '';
+      const placeholder = el('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Decision Year';
+      yearSel.append(placeholder);
+      const years = Array.isArray(filters?.years) ? filters.years : [];
+      years.forEach(year => {
+        const opt = el('option');
+        opt.value = year;
+        opt.textContent = year;
+        yearSel.append(opt);
+      });
+      yearSel.value = selected || '';
+    }
+  }
+
+  function renderResults(list){
+    if (!resultsHost) return;
+    resultsHost.innerHTML = '';
+    if (!Array.isArray(list) || !list.length) {
+      resultsHost.innerHTML = '<div class="result-item">No case law found.</div>';
+      return;
+    }
+
+    list.forEach(item => {
+      const card = el('div', 'result-item case-law-card');
+      const title = `${item.petitioner} vs ${item.respondent} [${item.citation}]`;
+      const metaParts = [item.primary_type, item.case_type, item.decision_year];
+      const meta = metaParts.filter(Boolean).join(' · ');
+      const notePreview = item.note_preview || 'No note saved yet.';
+      const textPreview = item.text_preview || '';
+      card.innerHTML = `
+        <div class="cl-card-head">
+          <div class="cl-card-title">${escapeHtml(title)}</div>
+          <div class="cl-card-meta">${escapeHtml(meta)}</div>
+        </div>
+        <div class="cl-card-body">
+          <div class="cl-snippet">${escapeHtml(textPreview)}</div>
+          <div class="cl-note-preview cl-muted">${escapeHtml(notePreview)}</div>
+        </div>
+        <div class="cl-card-actions">
+          <a class="btn-secondary cl-download" href="${item.download_url}" target="_blank" rel="noopener">Download Judgment</a>
+          <button class="btn-primary cl-note" type="button">View / Edit Note</button>
+        </div>
+      `;
+
+      const previewEl = card.querySelector('.cl-note-preview');
+      const noteBtn = card.querySelector('.cl-note');
+      noteBtn?.addEventListener('click', async () => {
+        try {
+          const resp = await fetch(`/case-law/${item.id}/note`);
+          const data = await resp.json().catch(()=>({}));
+          if (!resp.ok || !data.ok) {
+            throw new Error(data.msg || `HTTP ${resp.status}`);
+          }
+          const context = {
+            kind: 'case-law',
+            id: item.id,
+            onSaved: (summary) => {
+              if (previewEl) {
+                previewEl.textContent = summary || 'No note saved yet.';
+              }
+            }
+          };
+          openNotesModal(data.content || '', data.content ? 'update' : 'create', context);
+        } catch (err) {
+          alert(`Unable to load note: ${err.message || err}`);
+        }
+      });
+
+      resultsHost.append(card);
+    });
+  }
+
+  function currentMode(){
+    return document.querySelector('input[name="cls-mode"]:checked')?.value || 'name';
+  }
+
+  async function performSearch(){
+    const mode = currentMode();
+    const params = new URLSearchParams();
+
+    if (mode === 'name') {
+      const selectedRadio = document.querySelector('input[name="cls-name-mode"]:checked');
+      const targetId = selectedRadio?.dataset.target;
+      const input = targetId ? document.getElementById(targetId) : null;
+      const party = input?.value.trim();
+      if (!party) { alert('Enter a party name to search.'); return; }
+      const modeSel = selectedRadio?.value || 'either';
+      params.set('party', party);
+      params.set('party_mode', modeSel);
+    } else if (mode === 'citation') {
+      const citation = citationInput?.value.trim();
+      if (!citation) { alert('Enter a citation to search.'); return; }
+      params.set('citation', citation);
+    } else if (mode === 'year') {
+      const year = yearSel?.value.trim();
+      if (!year) { alert('Select a decision year.'); return; }
+      params.set('year', year);
+    } else if (mode === 'type') {
+      const primary = primarySel?.value.trim();
+      const caseType = caseTypeSel?.value.trim();
+      if (!primary) { alert('Choose a primary type.'); return; }
+      params.set('primary_type', primary);
+      if (caseType) params.set('case_type', caseType);
+    } else if (mode === 'advanced') {
+      const text = textInput?.value.trim();
+      if (!text) { alert('Enter a query for advanced search.'); return; }
+      params.set('text', text);
+    }
+
+    params.set('limit', '200');
+
+    try {
+      const resp = await fetch(`/case-law/search?${params.toString()}`);
+      const data = await resp.json().catch(()=>({}));
+      if (!resp.ok) {
+        throw new Error(data.error || `HTTP ${resp.status}`);
+      }
+      renderResults(data.results || []);
+      if (data.filters) {
+        applyFilters(data.filters);
+      }
+    } catch (err) {
+      alert(`Search failed: ${err.message || err}`);
+    }
+  }
+
+  $('#cls-search')?.addEventListener('click', performSearch);
+  textInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      performSearch();
+    }
+  });
+
+  $('#cls-reset')?.addEventListener('click', () => {
+    const defaultRadio = radios[0];
+    if (defaultRadio) {
+      defaultRadio.checked = true;
+      showPanel(defaultRadio.value);
+    }
+    [partyInput, citationInput, textInput].forEach(field => { if (field) field.value = ''; });
+    if (yearSel) yearSel.selectedIndex = 0;
+    if (primarySel) primarySel.selectedIndex = 0;
+    if (caseTypeSel) {
+      caseTypeSel.innerHTML = '<option value="">Case Type</option>';
+      caseTypeSel.disabled = true;
+    }
+    if (resultsHost) resultsHost.innerHTML = '';
+  });
+
+  async function loadFilters(){
+    try {
+      const resp = await fetch('/case-law/search?limit=1');
+      const data = await resp.json().catch(()=>({}));
+      if (data.filters) {
+        applyFilters(data.filters);
+      }
+    } catch (err) {
+      console.warn('Failed to load case-law filters', err);
+    }
+  }
+
+  loadFilters();
+}
+
 // -------------------- Notes modal global handlers --------------------
 function bindGlobalNotesModalHandlers(){
   const modal   = document.getElementById('notesModal');
@@ -957,7 +1491,16 @@ function bindGlobalNotesModalHandlers(){
 
   if (!modal || !editor || !saveBtn || !cancel || !close || !editBtn) return;
 
+  const NOTE_ESCAPE_RE = /\\r\\n|\\n|\\r/g;
+
+  function asViewText(raw){
+    if (!raw) return '';
+    return raw.replace(NOTE_ESCAPE_RE, '\n');
+  }
+
   let originalContent = '';
+  let rawContent = '';
+  let noteContext = null;
 
   function setState(state){
     modal.dataset.state = state;
@@ -968,15 +1511,18 @@ function bindGlobalNotesModalHandlers(){
     editBtn.hidden = editing || modal.dataset.intent === 'create';
     cancel.textContent = editing && modal.dataset.intent !== 'create' ? 'Cancel' : 'Close';
     if (!editing) {
+      editor.value = asViewText(rawContent);
       // ensure caret doesn't stay focused when in view mode
       editor.blur();
+    } else {
+      editor.value = rawContent;
     }
   }
 
   function openModal(content, intent){
     modal.dataset.intent = intent === 'create' ? 'create' : 'update';
-    originalContent = content || '';
-    editor.value = originalContent;
+    rawContent = content || '';
+    originalContent = rawContent;
     setState(intent === 'create' ? 'edit' : 'view');
     editor.style.display = 'block';
     modal.removeAttribute('hidden');
@@ -996,42 +1542,77 @@ function bindGlobalNotesModalHandlers(){
     editor.readOnly = true;
     editor.blur();
     editor.style.display = 'none';
+    noteContext = null;
   }
 
   // Public helper used by manageCaseForm
-  window._openNotesWith = function(content, intent){
+  window._openNotesWith = function(content, intent, context){
+    noteContext = context || null;
     openModal(content || '', intent || 'update');
   };
 
   editBtn.addEventListener('click', () => {
-    originalContent = editor.value;
+    rawContent = originalContent;
     setState('edit');
     editor.focus();
     editor.setSelectionRange(editor.value.length, editor.value.length);
   });
 
   async function saveCurrent(){
+    const intent = modal.dataset.intent === 'create' ? 'create' : 'update';
+    const payloadContent = editor.value;
+
+    if (noteContext && noteContext.kind === 'case-law') {
+      const caseId = noteContext.id;
+      if (!caseId) {
+        alert('Missing case-law identifier.');
+        return;
+      }
+      try {
+        const resp = await fetch(`/case-law/${caseId}/note`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: payloadContent })
+        });
+        const data = await resp.json().catch(()=>({}));
+        if (!resp.ok || !data.ok) {
+          throw new Error(data.msg || `HTTP ${resp.status}`);
+        }
+        rawContent = editor.value;
+        originalContent = rawContent;
+        alert('Notes saved!');
+        if (typeof noteContext.onSaved === 'function') {
+          noteContext.onSaved(data.summary || '');
+        }
+        modal.dataset.intent = 'update';
+        setState('view');
+        closeModal();
+      } catch (err) {
+        alert(`Save failed: ${err.message || err}`);
+      }
+      return;
+    }
+
     const yEl = document.getElementById('mc-year');
     const mEl = document.getElementById('mc-month');
     const cEl = document.getElementById('mc-case');
-    const year  = yEl?.value || '';
-    const month = mEl?.value || '';
-    const cname = cEl?.value || '';
+    const year  = (noteContext && noteContext.year) || yEl?.value || '';
+    const month = (noteContext && noteContext.month) || mEl?.value || '';
+    const cname = (noteContext && noteContext.caseName) || cEl?.value || '';
 
     if (!year || !month || !cname) {
       alert('Select Year, Month, and Case first.');
       return;
     }
 
-    const body = { content: editor.value };
-    const intent = modal.dataset.intent === 'create' ? 'create' : 'update';
+    const body = { content: payloadContent };
     let resp;
     try {
       if (intent === 'create') {
         resp = await fetch('/api/create-note', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ year, month, case: cname, content: editor.value })
+          body: JSON.stringify({ year, month, case: cname, content: payloadContent })
         });
       } else {
         resp = await fetch(`/api/note/${year}/${month}/${encodeURIComponent(cname)}`, {
@@ -1044,11 +1625,12 @@ function bindGlobalNotesModalHandlers(){
       if (!resp.ok || !data.ok) {
         throw new Error(data.msg || `HTTP ${resp.status}`);
       }
-      originalContent = editor.value;
+      rawContent = editor.value;
+      originalContent = rawContent;
       alert(intent === 'create' ? 'Note.json created!' : 'Notes saved!');
-      closeModal();
       modal.dataset.intent = 'update';
       setState('view');
+      closeModal();
       if (typeof window.__refreshNoteButton === 'function') {
         window.__refreshNoteButton();
       }
@@ -1060,11 +1642,11 @@ function bindGlobalNotesModalHandlers(){
   function handleCancel(){
     const editing = modal.dataset.state === 'edit';
     if (editing && modal.dataset.intent !== 'create') {
-      editor.value = originalContent;
+      rawContent = originalContent;
       setState('view');
       return;
     }
-    editor.value = originalContent;
+    rawContent = originalContent;
     closeModal();
     setState('view');
   }
@@ -1072,7 +1654,7 @@ function bindGlobalNotesModalHandlers(){
   saveBtn.addEventListener('click', saveCurrent);
   cancel.addEventListener('click', handleCancel);
   close.addEventListener('click', () => {
-    editor.value = originalContent;
+    rawContent = originalContent;
     closeModal();
     setState('view');
   });
@@ -1179,29 +1761,65 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Directory search (if button exists)
   const dirBtn = document.getElementById('dir-search');
-  dirBtn?.addEventListener('click', async () => {
-    const results = document.getElementById('results');
-    if (results) results.innerHTML = '<div class="result-item">Loading directory tree...</div>';
-    await showDirLevel('');
-  });
+  if (dirBtn) {
+    dirBtn.setAttribute('aria-pressed', 'false');
+    dirBtn.addEventListener('click', async () => {
+      const results = document.getElementById('results');
+      if (!results) return;
 
-  // Cards + forms
-  const cardCreate = $('#card-create');
-  const cardManage = $('#card-manage');
-  if (cardCreate && cardManage) {
-    const activateCreate = ()=>{ setActive(cardCreate, [cardManage]); createCaseForm(); };
-    const activateManage = ()=>{ setActive(cardManage, [cardCreate]); manageCaseForm(); };
-    cardCreate.addEventListener('click', activateCreate);
-    cardManage.addEventListener('click', activateManage);
-    [cardCreate, cardManage].forEach(c=>{
-      c.addEventListener('keydown', (e)=>{
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          (c === cardCreate ? activateCreate : activateManage)();
+      if (!dirSearchState.active) {
+        dirSearchState.active = true;
+        dirSearchState.previousScroll = results.scrollTop || 0;
+        dirSearchState.currentPath = '';
+        dirBtn.classList.add('active');
+        dirBtn.textContent = 'Exit Directory Search';
+        dirBtn.setAttribute('aria-pressed', 'true');
+        results.innerHTML = '<div class="result-item">Loading directory tree...</div>';
+        await showDirLevel('');
+      } else {
+        dirSearchState.active = false;
+        dirSearchState.currentPath = '';
+        dirBtn.classList.remove('active');
+        dirBtn.textContent = 'Directory Search';
+        dirBtn.setAttribute('aria-pressed', 'false');
+        const snapshot = cloneResults(lastRenderedResults) || null;
+        if (Array.isArray(snapshot)) {
+          renderResults(snapshot);
+          const host = document.getElementById('results');
+          if (host) host.scrollTop = dirSearchState.previousScroll || 0;
+        } else {
+          results.innerHTML = '<div class="result-item">Use the search tools above to view results.</div>';
         }
-      });
+        dirSearchState.previousScroll = 0;
+      }
     });
   }
+
+  // Cards + forms
+  const cardConfigs = [
+    { el: $('#card-create'), handler: createCaseForm },
+    { el: $('#card-manage'), handler: manageCaseForm },
+    { el: $('#card-upload-case-law'), handler: caseLawUploadForm },
+    { el: $('#card-search-case-law'), handler: caseLawSearchForm },
+  ];
+
+  const cardElements = cardConfigs.map(cfg => cfg.el).filter(Boolean);
+
+  cardConfigs.forEach(({ el, handler }) => {
+    if (!el || typeof handler !== 'function') return;
+    const others = cardElements.filter(other => other !== el);
+    const activate = () => {
+      setActive(el, others);
+      handler();
+    };
+    el.addEventListener('click', activate);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        activate();
+      }
+    });
+  });
 
   // Notes modal global handlers (Save/Cancel/Close)
   bindGlobalNotesModalHandlers();
