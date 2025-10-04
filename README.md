@@ -120,6 +120,22 @@ Example Filename:
 (14092025) TP CIVIL Petitioner v. Respondent.pdf
 ```
 
+Case-laws are organized as:
+
+```none
+case-law/
+  2025/
+    Petitioner v. Respondent/
+      Note.json
+      Petitioner v. Respondent [citation].pdf
+```
+
+Example Filename:
+
+```none
+Petitioner v. Respondent [citation].pdf
+```
+
 ---
 
 ## Development Notes
